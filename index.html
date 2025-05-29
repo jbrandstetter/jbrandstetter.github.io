@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Flashcard App</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- PapaParse for CSV parsing -->
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.3.2/papaparse.min.js"></script>
+  <style>
+    /* Flip animation */
+    .card { perspective: 1000px; }
+    .inner { position: relative; width: 100%; transform-style: preserve-3d; transition: transform 0.6s; }
+    .inner.flipped { transform: rotateY(180deg); }
+    .face {
+      backface-visibility: hidden;
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      /* center both axes by default */
+      align-items: center;
+      justify-content: center;
+      /* base padding */
+      padding: 1rem;
+      /* Preserve line breaks */
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .face.back {
+      transform: rotateY(180deg);
+      /* Align back content to top-left */
+      align-items: flex-start;
+      justify-content: flex-start;
+      text-align: left;
+      /* extra left padding */
+      padding-left: 2rem;
+    }
+    /* Message banner */
+    #message { display: none; margin-bottom: 1rem; padding: 0.75rem; border-radius: 0.5rem; background-color: #fde047; color: #333; text-align: center; }
+  </style>
+</head>
+<body class="bg-gray-100 flex items-center justify-center min-h-screen p-4">
+  <div class="w-full max-w-md">
+    <div id="message"></div>
+    <div class="card bg-white rounded-2xl shadow-xl overflow-hidden">
+      <div id="cardInner" class="inner h-64 p-6">
+        <div class="face front text-xl font-semibold text-gray-800"></div>
+        <div class="face back text-xl font-semibold text-gray-800"></div>
+      </div>
+    </div>
+
+    <!-- Control buttons -->
+    <div id="controls" class="flex justify-between mt-6">
+      <button id="prevBtn" class="px-4 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600">Prev</button>
+      <button id="flipBtn" class="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600">Flip</button>
+      <button id="nextBtn" class="px-4 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600">Next</button>
+    </div>
+    <!-- Evaluation buttons -->
+    <div id="evalControls" class="flex justify-between mt-6 hidden">
+      <button id="correctBtn" class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600">I knew it</button>
+      <button id="wrongBtn" class="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600">I didn't know</button>
+    </div>
+  </div>
+
+  <script>
+    // Embedded CSV data: question,answer
+    const csvData = `
+Question,Answer
+Question,Answer
+What is Retrieval-Augmented Generation (RAG)?,A workflow that retrieves relevant documents at run-time and injects them into the model prompt to ground the answer.
+What does "recall" measure in RAG?,The percentage of truly relevant documents that were successfully retrieved and passed to the model.
+Name three ways to improve recall.,Better embeddings, smarter chunking (semantic or overlapping), and increasing k with re-ranking.
+What is a tool call in LLM systems?,A structured function call the model emits to fetch live data or run code outside the model itself.
+How is tool use different from RAG?,Tool use performs an external action; RAG just supplies extra context inside the prompt.
+What does MCP stand for?,Model – Controller – Planner.
+Role of the Planner in MCP,It breaks a user goal into ordered subtasks or tool calls.
+Define prefill latency.,Time for the model to process the entire prompt before emitting the first token.
+Define Time-To-First-Token (TTFT).,Latency from request to first generated token visible to the user.
+Two quick levers to cut TTFT,Shorter prompts and model-side batching/parallelism.
+What is inter-token latency (ITL)?,Average time between consecutive generated tokens after the first.
+Why does long context inflate TTFT?,The model has to attend over every prompt token during the prefill phase.
+Metric for code suggestion usefulness,"Change acceptance rate"—% of suggestions merged and not rolled back.
+What is HumanEval?,A benchmark that tests LLM-generated code by running functional unit tests.
+What does BLEU measure?,N-gram precision overlap between candidate and reference text.
+What does ROUGE-L emphasize?,Longest common subsequences; recall-oriented for summarization quality.
+What is pass@k in code evaluation?,Probability that at least one of k sampled completions will pass tests.
+Give an example of a task-based LLM metric.,“Time saved per bug fix” or “tasks completed within SLA”.
+What is a system prompt?,A hidden instruction that establishes model persona and constraints.
+Define chain-of-thought prompting.,A technique asking the model to show step-by-step reasoning to improve accuracy.
+What is few-shot prompting?,Supplying a handful of question-answer examples inside the prompt to guide model behavior.
+Self-consistency prompting purpose,Sample multiple chains of thought and pick the majority answer to boost reliability.
+Temperature parameter effect,Controls randomness; lower = deterministic, higher = creative.
+Top-p sampling definition,"Nucleus" sampling that picks tokens cumulatively covering probability p.
+What is an embedding model used for?,Turning text into vectors for similarity search or clustering.
+Semantic chunking vs fixed-window chunking,"Semantic" splits docs by meaning (headings, functions) rather than token length.
+Two causes of low recall even with good embeddings,Over-fragmented chunks and index missing recent data.
+What is vector collision?,Unrelated chunks ending up close in embedding space, harming retrieval precision.
+Define perplexity.,Log-likelihood-based metric of how well a model predicts a dataset; lower = better.
+Why perplexity isn’t always a good product metric?,It doesn’t correlate directly with task usefulness or user trust.
+What is LoRA fine-tuning?,Low-Rank Adaptation—injects small trainable matrices to adapt a frozen model cheaply.
+Difference between SFT and RLHF,SFT = supervised fine-tuning on human pairs; RLHF = further tuning via reinforcement and human preference data.
+Explain diffusion vs autoregressive decoding.,Diffusion refines an entire sequence in parallel; autoregressive predicts token-by-token.
+Why diffusion excels at Quick Edits,Fast full-sequence output and less reliance on deep chain-of-thought reasoning.
+Primary diffusion drawback for large-context reasoning,Lack of token-level chain-of-thought, reducing explainability.
+Define quantization in LLMs.,Compressing weights to lower precision (INT8, INT4) to fit models on smaller GPUs/TPUs.
+KV-cache purpose,Stores key/value attention states so the model doesn’t recompute them for previous tokens.
+How does batching raise throughput?,Combines multiple sequences into one matrix multiply on the GPU.
+One downside of large retrieval k,More latency and noise—precision may drop if re-ranking is weak.
+Describe speculative decoding.,Draft tokens with a small model, then verify with a large model to speed up decoding.
+What is TTFT model_only?,Latency measured from prompt arrival at model server to first token generation.
+Why monitor rollback rate after launch?,High rollbacks signal silent quality issues eroding developer trust.
+Three Google dev tools to drop in conversation,Blaze/Bazel, Critique, Rosie.
+What is Buganizer used for?,Internal Google issue and bug tracking.
+What does CodeSearch provide?,Indexed full-text and symbol search over the monorepo.
+Metric: time-to-insight (TTI),Time from question to actionable information surfaced to the user.
+Example of prompt guardrail for PII,Stripping emails and access tokens before passing user text to the model.
+What is an intent handshake?,A quick model-to-user confirmation of understanding before executing a risky action.
+Why acceptance-rate > generation-rate?,High volume alone is vanity; accepted, landed changes prove value.
+Two signals for developer trust,Bounce rate after first try and feature re-enable after failure.
+Define hybrid search.,Combining vector (semantic) and keyword (BM25) retrieval to improve recall+precision.
+Purpose of re-ranking in retrieval,Sort the initial candidate set by a more precise relevance model.
+Chunk overlap benefit,Prevents relevant info from splitting across boundaries, boosting recall.
+What is prompt stuffing?,Overloading a prompt with excessive context, leading to high latency and possible dilution of focus.
+Why is chain-of-thought often hidden in prod?,Verbose reasoning can leak sensitive info and slow reading; many UIs keep it optional.
+Trade-off: longer prompts vs. retrieval?,Longer prompts may increase TTFT; retrieval can keep prompt lean while adding context on demand.
+Define pass@1,Probability that a single sampled completion passes tests.
+How does A/B testing help LLM UX?,Measures real impact (acceptance, latency) across user cohorts before full rollout.
+What is trust decay?,Drop in user willingness to use the feature after bad outputs.
+Metric to catch silent failures,Look at post-merge bug rates or post-deploy rollbacks linked to AI code.
+Why measure CSAT alongside objective metrics?,User perception can diverge from technical correctness and impacts adoption.
+Name a prompting pattern for safer code fixes,"Read-think-act": model explains understanding, then proposes diff, then asks for confirmation.
+Purpose of a system temperature sweep,Finding the lowest randomness that still maintains creativity/completeness for a task.
+What is prompt echoing?,Model repeats user input verbatim; often unwanted and wastes tokens.
+Why is retrieval latency critical for TTFT?,It sits before model inference—any slowdown directly delays the first token.
+Define vector DB cache hit rate,Percentage of queries served from in-memory store versus slower disk or remote reads.
+Product metric: trust bounce,"First-time users who abandon the feature after one failed suggestion."
+Example of human-in-the-loop eval,Pairwise ranking of model outputs by engineers for helpfulness.
+Difference: precision vs recall,Precision = correct retrieved / retrieved; Recall = correct retrieved / total correct.
+Why raise k gradually?,To observe marginal recall gains versus latency cost.
+One benefit of self-reflection prompting,Model can critique its own answer and improve robustness.
+When to use temperature=0,For deterministic outputs where creativity isn’t needed.
+Describe embedding fine-tuning pipeline,Collect domain data → train on contrastive loss → evaluate recall/precision → deploy new model.
+Why chunk headings into embeddings?,Headings provide high-signal keywords aiding retrieval ranking.
+Define hallucination in LLMs.,Confident generation of information not present in training data or context.
+One mitigation for hallucinations,Ask model to cite sources, then verify citations.
+What is RLCD (Rollback-Later Code Defect)?,Issue when change passes review but causes production defect; tracks AI trust erosion.
+How does context window limit reasoning?,Model can only attend to tokens inside the window; older tokens forgotten if exceeded.
+Define speculative inline diffs,Model drafts code edits, then verifies correctness with tests before suggesting to user.
+Why is grounding important?,Reduces hallucinations and boosts user trust by tying answers to real docs.
+Explain "memory" in agentic systems,Storing past interactions or intermediate results so future steps have context beyond current prompt.
+One risk of large vector DBs,Increased storage cost and slower nearest-neighbour queries leading to latency spikes.
+Metric: prompt token cost per request,Input tokens × cost per 1K; vital for ROI calculations.
+What does pass@k tell you?,Odds that at least one of k samples is correct—captures stochastic improvement with sampling.
+Why upskill devs on prompting?,Cheapest lever to improve quality before fine-tuning; empowers power users.
+Define model queue delay,Waiting time before a request is scheduled on GPU/TPU—can dominate TTFT under load.
+Explain flash attention,Memory-efficient attention algorithm that speeds up long-sequence prefill and decode.
+Benefit of INT4 quant on 70B model,Fits weights on single 80 GB GPU, enabling higher concurrency.
+Name a product KPI for Quick Edits,Code-change acceptance rate or average time-saved per accepted edit.
+What is pass-through evaluation?,Let the model call an external evaluator (tests, linters) before finalizing answer.
+Explain "n-shot" prompting,Supplying n example Q&A pairs to guide the model’s output style and logic.
+One reason to use reranking after retrieval,Improves precision by scoring candidate chunks with a more accurate (but slower) model.
+What is "coT visibility toggle"?,UI switch letting users see or hide chain-of-thought reasoning.
+Mention one diffusion trade-off vs AR,Faster TTFT but weaker multi-step logical reasoning.
+Describe the "intent handshake" step,Model summarizes its plan and asks user to confirm before executing risky changes.
+What is a hub-and-spoke eval pipeline?,Central script triggers multiple metric suites (BLEU, HumanEval, recall) for a single commit.
+Explain "developer trust lag",Time it takes for users to regain confidence after a failure.
+Name a metric to spot trust lag,Drop in feature re-enable or reduced engagement sessions post-incident.
+Difference between synthetic and real eval data,Synthetic generated automatically; real uses human-authored queries—real often uncovers edge cases.
+Why do we measure CSAT after rollout?,Early usage metrics can look good even if users secretly dislike the UX.
+Define "vector collision",Two unrelated chunks mapped to similar embeddings causing wrong retrieval.
+Give one mitigation for vector collision,Add additional metadata filters or re-rank with keyword overlap.
+What is a guard clause in code suggestions?,AI-proposed null/edge check that prevents runtime exceptions.
+Why monitor kv-cache memory?,Defines how many concurrent sessions a GPU can serve before OOM.
+Product metric: developer bounce-back,How many users return to feature after initial try—proxy for long-term usefulness.
+
+`;
+
+    let cards = [], current = 0;
+    const frontEl = document.querySelector('.front');
+    const backEl = document.querySelector('.back');
+    const innerEl = document.getElementById('cardInner');
+    const messageEl = document.getElementById('message');
+    const controls = document.getElementById('controls');
+    const evalControls = document.getElementById('evalControls');
+    const prevBtn = document.getElementById('prevBtn');
+    const flipBtn = document.getElementById('flipBtn');
+    const nextBtn = document.getElementById('nextBtn');
+    const correctBtn = document.getElementById('correctBtn');
+    const wrongBtn = document.getElementById('wrongBtn');
+
+    // Shuffle helper
+    function shuffle(array) {
+      for (let i = array.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [array[i], array[j]] = [array[j], array[i]];
+      }
+    }
+
+    function loadCards() {
+      const result = Papa.parse(csvData.trim(), { header: true });
+      cards = result.data;
+      shuffle(cards);
+    }
+
+    function renderCard(index) {
+      if (cards.length === 0) {
+        showMessage('All cards mastered! 🎉');
+        controls.classList.add('hidden');
+        return;
+      }
+      const card = cards[index];
+      frontEl.textContent = card.Question;
+      backEl.textContent = card.Answer;
+      innerEl.classList.remove('flipped');
+      controls.classList.remove('hidden');
+      evalControls.classList.add('hidden');
+    }
+
+    function showMessage(text) {
+      messageEl.textContent = text;
+      messageEl.style.display = 'block';
+      setTimeout(() => { messageEl.style.display = 'none'; }, 2000);
+    }
+
+    flipBtn.addEventListener('click', () => {
+      innerEl.classList.toggle('flipped');
+      if (innerEl.classList.contains('flipped')) {
+        controls.classList.add('hidden');
+        evalControls.classList.remove('hidden');
+      } else {
+        evalControls.classList.add('hidden');
+        controls.classList.remove('hidden');
+      }
+    });
+
+    prevBtn.addEventListener('click', () => {
+      if (current > 0) { current--; renderCard(current); }
+    });
+
+    nextBtn.addEventListener('click', () => {
+      if (current < cards.length - 1) { current++; renderCard(current); }
+      else { showMessage('End of deck reached. Reshuffling...'); shuffle(cards); current = 0; setTimeout(() => renderCard(current), 300); }
+    });
+
+    correctBtn.addEventListener('click', () => {
+      cards.splice(current, 1);
+      if (current >= cards.length) current = 0;
+      showMessage('Great! Removed from deck.');
+      setTimeout(() => renderCard(current), 300);
+    });
+
+    wrongBtn.addEventListener('click', () => {
+      if (current < cards.length - 1) current++;
+      else { showMessage('End of deck reached. Reshuffling...'); shuffle(cards); current = 0; }
+      setTimeout(() => renderCard(current), 300);
+    });
+
+    // Initialize
+    loadCards(); renderCard(current);
+  </script>
+</body>
+</html>
